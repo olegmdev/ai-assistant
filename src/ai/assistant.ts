@@ -62,6 +62,20 @@ const SAVE_LEAD_TOOL: Anthropic.Tool = {
   },
 };
 
+export interface SenderProfile {
+  displayName: string | null;
+  username: string | null;
+}
+
+function buildSenderSuffix(sender?: SenderProfile): string {
+  if (!sender) return "";
+  const parts: string[] = [];
+  if (sender.displayName) parts.push(sender.displayName);
+  if (sender.username) parts.push(`@${sender.username}`);
+  if (parts.length === 0) return "";
+  return `\n\nThe person you're replying to is ${parts.join(" ")}. Use their first name naturally if it fits — never force it into every reply, and don't use the @handle in the message body.`;
+}
+
 /**
  * Generate (and persist) a reply for an inbound DM. Returns the text to send
  * back to the user, or null if there is nothing to say.
@@ -69,6 +83,7 @@ const SAVE_LEAD_TOOL: Anthropic.Tool = {
 export async function generateReply(
   conversationId: string,
   platform: Platform,
+  sender?: SenderProfile,
 ): Promise<string | null> {
   const history = await loadHistory(conversationId);
   if (history.length === 0) return null;
@@ -77,6 +92,7 @@ export async function generateReply(
     role: m.role,
     content: m.content,
   }));
+  const systemPrompt = SYSTEM_PROMPT + buildSenderSuffix(sender);
 
   // Manual tool loop: let Claude call save_collab_lead, feed results back,
   // and continue until it produces a final text reply.
@@ -85,7 +101,7 @@ export async function generateReply(
       model: config.anthropic.model,
       max_tokens: 1024,
       thinking: { type: "adaptive" },
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       tools: [SAVE_LEAD_TOOL],
       messages,
     });

@@ -14,7 +14,11 @@ export interface Conversation {
   platform: Platform;
   external_user_id: string;
   status: ConversationStatus;
+  display_name: string | null;
+  username: string | null;
 }
+
+const CONVO_COLS = "id, platform, external_user_id, status, display_name, username";
 
 export interface StoredMessage {
   role: "user" | "assistant";
@@ -28,7 +32,7 @@ export async function getOrCreateConversation(
 ): Promise<Conversation> {
   const { data: existing, error: selErr } = await supabase
     .from("conversations")
-    .select("id, platform, external_user_id, status")
+    .select(CONVO_COLS)
     .eq("platform", platform)
     .eq("external_user_id", externalUserId)
     .maybeSingle();
@@ -39,11 +43,28 @@ export async function getOrCreateConversation(
   const { data: created, error: insErr } = await supabase
     .from("conversations")
     .insert({ platform, external_user_id: externalUserId })
-    .select("id, platform, external_user_id, status")
+    .select(CONVO_COLS)
     .single();
 
   if (insErr) throw insErr;
   return created as Conversation;
+}
+
+/** Store the sender's display name / username on the conversation row. */
+export async function setConversationProfile(
+  conversationId: string,
+  profile: { name?: string; username?: string },
+): Promise<void> {
+  const update: Record<string, string | null> = {};
+  if (profile.name !== undefined) update.display_name = profile.name ?? null;
+  if (profile.username !== undefined) update.username = profile.username ?? null;
+  if (Object.keys(update).length === 0) return;
+  update.updated_at = new Date().toISOString();
+  const { error } = await supabase
+    .from("conversations")
+    .update(update)
+    .eq("id", conversationId);
+  if (error) throw error;
 }
 
 /** Pause or resume the bot for a single conversation. */

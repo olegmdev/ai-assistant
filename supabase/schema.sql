@@ -9,10 +9,16 @@ create table if not exists conversations (
   platform         text not null check (platform in ('instagram', 'threads')),
   external_user_id text not null,
   status           text not null default 'active',
+  display_name     text,
+  username         text,
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now(),
   unique (platform, external_user_id)
 );
+
+-- Migration for existing installs: adds the profile-cache columns.
+alter table conversations add column if not exists display_name text;
+alter table conversations add column if not exists username     text;
 
 -- Every inbound (user) and outbound (assistant) message.
 -- message_id is the Meta mid for inbound messages and is unique, so retried

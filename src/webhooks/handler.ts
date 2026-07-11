@@ -3,13 +3,16 @@ import { log, serializeError } from "../logger.js";
 import type { InboundMessage, WebhookBody } from "../meta/types.js";
 import { sendTextMessage, sendAudioMessage } from "../meta/client.js";
 import { buildStoryReplyContext } from "../meta/stories.js";
+import { fetchUserProfile } from "../meta/users.js";
 import { transcribeAudio, synthesizeSpeech, voiceEnabled } from "../voice/elevenlabs.js";
 import { putAudio } from "../voice/audioStore.js";
 import {
   getOrCreateConversation,
   recordInboundMessage,
   recordAssistantMessage,
+  setConversationProfile,
   setConversationStatus,
+  type Conversation,
 } from "../db/supabase.js";
 import { generateReply } from "../ai/assistant.js";
 import { parseControlCommand, type ControlCommand } from "../control.js";
@@ -98,9 +101,36 @@ export async function applyOwnerCommand(cmd: OwnerCommand): Promise<void> {
   });
 }
 
+/**
+ * Look up the sender's display name / username if we don't already have it
+ * cached on the conversation row. Best-effort — failures leave the row as-is.
+ */
+async function ensureSenderProfile(
+  convo: Conversation,
+  msg: InboundMessage,
+): Promise<Conversation> {
+  if (convo.display_name || convo.username) return convo;
+  const profile = await fetchUserProfile(msg.platform, msg.senderId);
+  if (!profile) return convo;
+  try {
+    await setConversationProfile(convo.id, profile);
+  } catch (err) {
+    log.warn("Failed to store sender profile", {
+      conversationId: convo.id,
+      err: serializeError(err),
+    });
+  }
+  return {
+    ...convo,
+    display_name: profile.name ?? convo.display_name,
+    username: profile.username ?? convo.username,
+  };
+}
+
 /** Process one inbound DM end-to-end: persist, think, reply. */
 export async function processInboundMessage(msg: InboundMessage): Promise<void> {
-  const convo = await getOrCreateConversation(msg.platform, msg.senderId);
+  let convo = await getOrCreateConversation(msg.platform, msg.senderId);
+  convo = await ensureSenderProfile(convo, msg);
 
   // Voice note: transcribe to text so the rest of the pipeline (storage,
   // history, Claude) works unchanged. A voice DM gets a voice reply.
@@ -147,7 +177,10 @@ export async function processInboundMessage(msg: InboundMessage): Promise<void> 
     return;
   }
 
-  const reply = await generateReply(convo.id, msg.platform);
+  const reply = await generateReply(convo.id, msg.platform, {
+    displayName: convo.display_name,
+    username: convo.username,
+  });
   if (!reply) return;
 
   // Voice in → voice out, when ElevenLabs is configured. Fall back to text if
