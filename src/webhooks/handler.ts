@@ -2,6 +2,7 @@ import type { Platform } from "../config.js";
 import { log, serializeError } from "../logger.js";
 import type { InboundMessage, WebhookBody } from "../meta/types.js";
 import { sendTextMessage, sendAudioMessage } from "../meta/client.js";
+import { buildStoryReplyContext } from "../meta/stories.js";
 import { transcribeAudio, synthesizeSpeech, voiceEnabled } from "../voice/elevenlabs.js";
 import { putAudio } from "../voice/audioStore.js";
 import {
@@ -38,6 +39,7 @@ export function extractInboundMessages(body: WebhookBody): InboundMessage[] {
       const audioUrl = msg.attachments?.find(
         (a) => a.type === "audio" && a.payload?.url,
       )?.payload?.url;
+      const storyId = msg.reply_to?.story?.id;
       if ((!text && !audioUrl) || !senderId || !messageId) continue;
 
       out.push({
@@ -47,6 +49,7 @@ export function extractInboundMessages(body: WebhookBody): InboundMessage[] {
         messageId,
         text: text ?? "",
         audioUrl,
+        storyId,
       });
     }
   }
@@ -113,6 +116,20 @@ export async function processInboundMessage(msg: InboundMessage): Promise<void> 
     }
     text = transcript;
     log.info("Transcribed voice note", { conversationId: convo.id });
+  }
+
+  // Story replies: fetch the story's caption + audio transcript and prepend it
+  // to the stored message so Claude has the context. Best-effort — if the
+  // story has expired or the fetch fails, we proceed with the plain message.
+  if (msg.storyId) {
+    const context = await buildStoryReplyContext(msg.platform, msg.storyId);
+    if (context) {
+      text = `${context}\n\n${text}`;
+      log.info("Attached story reply context", {
+        conversationId: convo.id,
+        storyId: msg.storyId,
+      });
+    }
   }
 
   const isNew = await recordInboundMessage(convo.id, msg.messageId, text);

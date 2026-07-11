@@ -25,6 +25,9 @@ export interface MessagingEvent {
     text?: string;
     is_echo?: boolean; // messages the account itself sent
     attachments?: Array<{ type?: string; payload?: { url?: string } }>;
+    // Instagram attaches this when the DM is a reply to one of the recipient's
+    // stories. `story.id` is the media ID we can look up via the Graph API.
+    reply_to?: { story?: { id?: string; url?: string } };
   };
 }
 
@@ -42,4 +45,7 @@ export interface InboundMessage {
   // Set when the DM is a voice note: the URL of the audio attachment to
   // transcribe. When present, the reply is sent back as voice too.
   audioUrl?: string;
+  // Set when the DM is a reply to one of the recipient's Instagram stories.
+  // The Graph API media ID we can fetch to pull the story's audio + caption.
+  storyId?: string;
 }
